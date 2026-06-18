@@ -21,6 +21,11 @@ MIN_AREA = 500
 
 SENSOR_OFFSET_PIXEL = 35
 
+ROI_X_START = 0.0
+ROI_X_END   = 1.0
+ROI_Y_START = 0.35
+ROI_Y_END   = 0.95
+
 drive = MotorPair(LEFT_PORT, RIGHT_PORT)
 distance_sensor = DistanceSensor(DISTANCE_PORT)
 
@@ -61,11 +66,24 @@ def make_red_mask(hsv):
     return cv2.bitwise_or(mask1, mask2)
 
 
+def get_roi_bounds():
+    x1 = int(WIDTH * ROI_X_START)
+    x2 = int(WIDTH * ROI_X_END)
+    y1 = int(HEIGHT * ROI_Y_START)
+    y2 = int(HEIGHT * ROI_Y_END)
+    return x1, y1, x2, y2
+
+
 def make_green_mask(hsv):
     lower_green = np.array([40, 81, 28])
     upper_green = np.array([108, 255, 212])
 
     return cv2.inRange(hsv, lower_green, upper_green)
+
+
+def draw_roi(frame):
+    x1, y1, x2, y2 = get_roi_bounds()
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 1)
 
 
 def clean_mask(mask):
@@ -76,7 +94,10 @@ def clean_mask(mask):
 
 
 def detect_object(frame, color_mode):
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    x1, y1, x2, y2 = get_roi_bounds()
+    roi = frame[y1:y2, x1:x2]
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
     if color_mode == "RED":
         mask = make_red_mask(hsv)
@@ -86,9 +107,7 @@ def detect_object(frame, color_mode):
     mask = clean_mask(mask)
 
     contours, _ = cv2.findContours(
-        mask,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
+        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
 
     if not contours:
@@ -101,6 +120,9 @@ def detect_object(frame, color_mode):
         return False, None, area, mask, None
 
     x, y, w, h = cv2.boundingRect(largest)
+
+    x += x1
+    y += y1
     cx = x + w // 2
     cy = y + h // 2
 
@@ -197,8 +219,38 @@ def avoid_left():
 
 try:
     print("Auto color tracking start")
+    print("카메라 창에서  's' = 시작 ,  'w' = 종료")
 
+    # ===== 출발 대기 =====
+    started = False
     while True:
+        ret, frame = cap.read()
+
+        if not ret:
+            print("Camera read failed")
+            break
+
+        cv2.putText(
+            frame,
+            "s = START    w = QUIT",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2
+        )
+        draw_roi(frame)
+        cv2.imshow("Camera", frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('s'):
+            started = True
+            break
+        elif key == ord('w'):
+            break
+
+    # ===== 실제 주행 (started 일 때만) =====
+    while started:
         ret, frame = cap.read()
 
         if not ret:
@@ -212,6 +264,7 @@ try:
 
         cv2.line(frame, (camera_center_x, 0), (camera_center_x, HEIGHT), (255, 0, 0), 2)
         cv2.line(frame, (target_x, 0), (target_x, HEIGHT), (0, 255, 255), 2)
+        draw_roi(frame)
 
         if mode is not None:
             draw_box(frame, mode, box)
@@ -258,7 +311,7 @@ try:
         cv2.imshow("Camera", frame)
         cv2.imshow("Mask", mask)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('w'):
             break
 
         time.sleep(0.03)
