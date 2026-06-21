@@ -1,7 +1,7 @@
-ROI_X_START = 0.0 
-ROI_X_END   = 1.0
-ROI_Y_START = 0.35
-ROI_Y_END   = 0.95 
+ROI_X_START = 0.0  # 가로 시작
+ROI_X_END   = 1.0  # 가로 끝
+ROI_Y_START = 0.35 # 세로 시작
+ROI_Y_END   = 0.95 # 세로 끝
 
 def get_roi_bounds():
     x1 = int(WIDTH * ROI_X_START)
