@@ -101,6 +101,29 @@ def detect_all_objects(frame):
     return objects
 
 
+def get_combined_mask(frame):
+    # 빨강+초록 마스크를 합쳐서 반환 (Mask 창 표시용)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    red = clean_mask(make_red_mask(hsv))
+    green = clean_mask(make_green_mask(hsv))
+    return cv2.bitwise_or(red, green)
+
+
+def detect_closest_object(frame, within_roi=True):
+    # 화면의 빨강/초록 기둥 중 '가장 가까운'(=면적이 가장 큰) 기둥 하나를 반환.
+    # within_roi=True 면 중심(cx)이 ROI 가로 범위 안에 있는 기둥만 후보로 본다.
+    objects = detect_all_objects(frame)
+
+    if within_roi:
+        x1, _, x2, _ = get_roi_bounds()
+        objects = [o for o in objects if x1 <= o["cx"] < x2]
+
+    if not objects:
+        return None
+
+    return max(objects, key=lambda o: o["area"])
+
+
 def draw_roi(frame):
     x1, y1, x2, y2 = get_roi_bounds()
     # 하얀색 ROI 박스 (잘 보이게 두껍게)

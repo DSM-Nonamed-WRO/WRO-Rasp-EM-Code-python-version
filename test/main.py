@@ -3,7 +3,11 @@ import cv2
 import numpy as np
 from HandsON_BuildHat_API import MotorPair, DistanceSensor
 
-from ROI import WIDTH, HEIGHT, detect_object, detect_all_objects, draw_roi, get_roi_bounds
+from ROI import (
+    WIDTH, HEIGHT,
+    detect_all_objects, detect_closest_object, get_combined_mask,
+    draw_roi, get_roi_bounds,
+)
 from devide import draw_divisions, get_weight
 
 LEFT_PORT = 'A'
@@ -40,6 +44,7 @@ else:
     drive = DummyDrive()
     distance_sensor = None
 
+
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
@@ -67,39 +72,29 @@ def get_distance():
 
 
 def choose_target(frame):
-    red_found, red_cx, red_area, red_mask, red_box = detect_object(frame, "RED")
-    green_found, green_cx, green_area, green_mask, green_box = detect_object(frame, "GREEN")
+    # 빨강/초록 상관없이 '가장 가까운'(=면적이 가장 큰) 기둥을 먼저 타겟으로 선택한다.
+    mask = get_combined_mask(frame)
+    obj = detect_closest_object(frame, within_roi=True)
 
-    if red_found and green_found:
-        if red_area >= green_area:
-            return "RED", red_cx, red_area, red_mask, red_box
-        else:
-            return "GREEN", green_cx, green_area, green_mask, green_box
+    if obj is None:
+        return None, None, 0, mask, None
 
-    if red_found:
-        return "RED", red_cx, red_area, red_mask, red_box
-
-    if green_found:
-        return "GREEN", green_cx, green_area, green_mask, green_box
-
-    combined_mask = cv2.bitwise_or(red_mask, green_mask)
-    return None, None, 0, combined_mask, None
+    box = (obj["x"], obj["y"], obj["w"], obj["h"], obj["cx"], obj["cy"])
+    return obj["color"], obj["cx"], obj["area"], mask, box
 
 
-def draw_detection_status(frame, mode, weight=None):
-    # ROI 안에 빨강/초록이 들어왔을 때 화면 하단에 표시 (색 + 현재 가중치)
+def draw_detection_status(frame, mode):
+    # ROI 안에 현재 감지된 색을 화면 좌측 하단에 표시
+    # (OpenCV 기본 폰트는 한글이 안 나와서 영어로 표기 - "RED 감지" 대응)
     if mode == "RED":
-        text = "RED IN ROI"
+        text = "RED DETECTED"
         color = (0, 0, 255)
     elif mode == "GREEN":
-        text = "GREEN IN ROI"
+        text = "GREEN DETECTED"
         color = (0, 255, 0)
     else:
-        text = "NO TARGET"
+        text = "NO DETECT"
         color = (200, 200, 200)
-
-    if weight is not None:
-        text += f"  W:{weight}"
 
     cv2.putText(
         frame,
@@ -108,6 +103,23 @@ def draw_detection_status(frame, mode, weight=None):
         cv2.FONT_HERSHEY_SIMPLEX,
         0.5,
         color,
+        1
+    )
+
+
+def draw_weight(frame, weight):
+    # 현재 가중치를 화면 우측 하단에 표시
+    text = "W: --" if weight is None else f"W: {weight}"
+    (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+    x = WIDTH - tw - 10
+    y = HEIGHT - 10
+    cv2.putText(
+        frame,
+        text,
+        (x, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 255, 255),
         1
     )
 
@@ -205,6 +217,13 @@ try:
         rx1, ry1, rx2, ry2 = get_roi_bounds()
         draw_divisions(frame, rx1, ry1, rx2, ry2)
         draw_labels(frame, detect_all_objects(frame))
+
+        # 대기 화면에서도 가장 가까운 색/가중치를 미리 보여준다
+        closest = detect_closest_object(frame)
+        wait_mode = closest["color"] if closest else None
+        wait_weight = get_weight(closest["cx"], rx1, rx2) if closest else None
+        draw_detection_status(frame, wait_mode)
+        draw_weight(frame, wait_weight)
         cv2.imshow("Camera", frame)
 
         key = cv2.waitKey(1) & 0xFF
@@ -235,7 +254,8 @@ try:
         weight = get_weight(cx, rx1, rx2)
         draw_divisions(frame, rx1, ry1, rx2, ry2)
         draw_labels(frame, detect_all_objects(frame))
-        draw_detection_status(frame, mode, weight)
+        draw_detection_status(frame, mode)
+        draw_weight(frame, weight)
 
         if mode is not None:
             distance = get_distance()
